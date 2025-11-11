@@ -98,6 +98,7 @@ class HologramClient {
   // Progress tracking
   final Map<int, int> fileProgress = {}; // fileId -> percentage
   final Map<int, bool> fileFeedback = {}; // feedback_index -> success
+  final Map<int, int> _uploadProgress = {}; // fileId -> bytes uploaded
 
   final _messageController = StreamController<Map<String, dynamic>>.broadcast();
   Stream<Map<String, dynamic>> get messages => _messageController.stream;
@@ -542,6 +543,11 @@ class HologramClient {
     required Uint8List bytes,
     Uri? overrideUploadUrl,
   }) async {
+    // Initialize upload progress
+    final totalBytes = bytes.length;
+    fileProgress[fileId] = 0;
+    _log('Video upload starting: file_id=$fileId name=$fileName size=$totalBytes bytes');
+    
     // Per spec, send prepare first, then HTTP upload to http://ip:8092
     // For single device mode (P), type should be 0
     prepareToTransmit(
@@ -590,14 +596,34 @@ class HologramClient {
           _log('Video upload attempt A (multipart:file) POST $url fields=${req.fields}');
           _log('Sending HTTP request...');
           final startTime = DateTime.now();
+          
+          // Track upload progress - update periodically during upload
+          _uploadProgress[fileId] = 0;
+          fileProgress[fileId] = 5; // Start at 5% (preparation done)
+          Timer? progressTimer;
+          progressTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+            // Estimate progress based on elapsed time and file size
+            // Assume average upload speed of ~1MB/s for estimation
+            final elapsed = DateTime.now().difference(startTime);
+            final estimatedSpeed = 1024 * 1024; // 1 MB/s
+            final estimatedBytes = (elapsed.inMilliseconds / 1000.0 * estimatedSpeed).toInt();
+            final estimatedProgress = ((estimatedBytes / totalBytes) * 100).clamp(5, 95).toInt();
+            if (estimatedProgress > (fileProgress[fileId] ?? 0)) {
+              fileProgress[fileId] = estimatedProgress;
+            }
+          });
+          
           final streamedResp = await req.send().timeout(
             const Duration(seconds: 60),
             onTimeout: () {
+              progressTimer?.cancel();
               final elapsed = DateTime.now().difference(startTime);
               _log('Video upload TIMEOUT (A) after ${elapsed.inSeconds}s');
               throw TimeoutException('Video upload timeout after 60 seconds');
             },
           );
+          progressTimer.cancel();
+          fileProgress[fileId] = 100; // Mark as complete
           final elapsed = DateTime.now().difference(startTime);
           _log('HTTP completed (A) in ${elapsed.inMilliseconds}ms');
           usedUrl = url.toString();
@@ -714,23 +740,33 @@ class HologramClient {
       } catch (e) {
         lastError = e is Exception ? e : Exception(e.toString());
         _log('Video upload failed for $url: $e');
+        // Reset progress on error
+        fileProgress[fileId] = 0;
         // Continue to next URL
       }
     }
 
     if (resp == null) {
       _log('ERROR: Video HTTP upload failed for all endpoints. Trying WS fallback...');
-      await _uploadVideoBytesFallback(
-        id: id,
-        fileId: fileId,
-        fileName: fileName,
-        bytes: bytes,
-      );
-      // After fallback, return a synthetic response to indicate success
-      return http.StreamedResponse(Stream.value('OK'.codeUnits), 200);
+      fileProgress[fileId] = 50; // Show 50% during fallback
+      try {
+        await _uploadVideoBytesFallback(
+          id: id,
+          fileId: fileId,
+          fileName: fileName,
+          bytes: bytes,
+        );
+        fileProgress[fileId] = 100; // Mark complete after fallback
+        // After fallback, return a synthetic response to indicate success
+        return http.StreamedResponse(Stream.value('OK'.codeUnits), 200);
+      } catch (e) {
+        fileProgress[fileId] = 0; // Reset on fallback failure
+        rethrow;
+      }
     }
     
     // Wait a bit for device to process and save the file
+    fileProgress[fileId] = 98; // Almost done, processing on device
     await Future<void>.delayed(const Duration(milliseconds: 1500));
     
     // Refresh file list to see the newly uploaded video
@@ -739,26 +775,45 @@ class HologramClient {
     // Wait for file list response
     await Future<void>.delayed(const Duration(milliseconds: 1000));
     
+    fileProgress[fileId] = 100; // Complete
+    _log('Video upload complete: file_id=$fileId name=$fileName');
+    
     return resp;
   }
 
   void deleteFiles({required String id, int fileId = 0, int type = 0}) {
     // type: 0 = single device (P), 1 = splicing (S), 2 = network (N)
+    // fileId: 0 = delete all files, >0 = delete specific file
     final order = _protocol.nextOrder();
     final props = <String, dynamic>{
-      'type': type,
+      'type': type, // 0 for single device mode
       'id': id,
       'file_id': fileId,
     };
+    
+    // Try matching prepareToTransmit pattern (source: 0, destination: 0)
+    // This is consistent with other file operations like 0x41
     final json = HologramProtocol.envelopeWithProperties(
       cmd: 0x43,
       order: order,
       properties: props,
-      source: 0,
-      destination: 0,
+      source: 0, // Use integer 0 like prepareToTransmit (0x41)
+      destination: 0, // Use integer 0 like prepareToTransmit (0x41)
     );
     _channel?.sink.add(json);
-    _log('TX 0x43 DeleteFiles type=$type file_id=$fileId (0=all files for single device)');
+    if (fileId == 0) {
+      _log('TX 0x43 DeleteFiles: ALL files (type=$type, id=$id) source=0 dest=0');
+    } else {
+      _log('TX 0x43 DeleteFiles: file_id=$fileId (type=$type, id=$id) source=0 dest=0');
+    }
+    _log('TX JSON: $json');
+    
+    // Automatically refresh file list after deletion
+    // Wait a bit for device to process the delete command
+    Future.delayed(const Duration(milliseconds: 800), () {
+      refreshFileList(id: id);
+      _log('Auto-refreshing file list after delete command');
+    });
   }
 
   void refreshFileList({required String id}) {

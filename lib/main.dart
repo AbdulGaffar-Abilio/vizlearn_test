@@ -177,42 +177,18 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _currentAngleAdjustment = null;
   }
 
-  Future<void> pickAndUploadImage() async {
-    final id = deviceId;
-    if (client == null || id == null || id.isEmpty) return;
-    final res = await FilePicker.platform.pickFiles(type: FileType.image);
-    if (res == null || res.files.isEmpty) return;
-    final file = res.files.first;
-    try {
-      final bytes = file.bytes ?? await file.xFile.readAsBytes();
-      final fileId = DateTime.now().millisecondsSinceEpoch % 1000000;
-      await client!.uploadImageBytes(
-        id: id,
-        fileId: fileId,
-        fileName: file.name,
-        bytes: bytes,
-      );
-    } catch (e, stackTrace) {
-      debugPrint('Image upload error: $e');
-      debugPrint('Stack trace: $stackTrace');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Image upload failed: $e'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
-          ),
-        );
-      }
-    }
-  }
-
   Future<void> pickAndUploadVideo() async {
     final id = deviceId;
     if (client == null || id == null || id.isEmpty) return;
     final res = await FilePicker.platform.pickFiles(type: FileType.video);
     if (res == null || res.files.isEmpty) return;
     final file = res.files.first;
+    
+    // Declare progress tracking variables outside try block
+    Timer? progressUpdateTimer;
+    StreamSubscription<String>? progressSub;
+    ValueNotifier<int>? progressNotifier;
+    
     try {
       Uint8List bytes;
       if (file.bytes != null) {
@@ -222,16 +198,98 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         bytes = await xf.readAsBytes();
       }
       final fileId = DateTime.now().millisecondsSinceEpoch % 1000000;
+      
+      // Show upload progress with periodic updates
+      progressNotifier = ValueNotifier<int>(0);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: ValueListenableBuilder<int>(
+              valueListenable: progressNotifier,
+              builder: (context, progress, _) {
+                return Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Uploading: ${file.name}'),
+                          const SizedBox(height: 4),
+                          LinearProgressIndicator(value: progress / 100),
+                          const SizedBox(height: 4),
+                          Text('$progress%', style: const TextStyle(fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+            duration: const Duration(minutes: 5), // Long duration to show progress
+            backgroundColor: Colors.blue,
+          ),
+        );
+        
+        // Update progress display periodically
+        final notifier = progressNotifier;
+        progressUpdateTimer = Timer.periodic(const Duration(milliseconds: 200), (timer) {
+          if (mounted) {
+            final progress = client!.fileProgress[fileId] ?? 0;
+            notifier.value = progress;
+            if (progress >= 100) {
+              timer.cancel();
+            }
+          } else {
+            timer.cancel();
+          }
+        });
+      }
+      
+      // Listen to progress updates and refresh UI
+      final notifier = progressNotifier;
+      progressSub = client!.logs.listen((_) {
+        if (mounted) {
+          setState(() {});
+          final progress = client!.fileProgress[fileId] ?? 0;
+          notifier.value = progress;
+        }
+      });
+      
       await client!.uploadVideo(
         id: id,
         fileId: fileId,
         fileName: file.name,
         bytes: bytes,
       );
+      
+      progressSub.cancel();
+      progressUpdateTimer?.cancel();
+      progressNotifier.dispose();
+      
+      // Show success message
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Video uploaded successfully!'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      
+      // Refresh UI
+      if (mounted) setState(() {});
     } catch (e, stackTrace) {
+      if (progressUpdateTimer != null) progressUpdateTimer.cancel();
+      if (progressSub != null) progressSub.cancel();
+      if (progressNotifier != null) progressNotifier.dispose();
       debugPrint('Video upload error: $e');
       debugPrint('Stack trace: $stackTrace');
       if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Video upload failed: $e'),
@@ -613,24 +671,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             runSpacing: 8,
             children: [
               ElevatedButton.icon(
-                onPressed: pickAndUploadImage,
-                icon: const Icon(Icons.image),
-                label: const Text('Upload Image'),
-              ),
-              ElevatedButton.icon(
                 onPressed: pickAndUploadVideo,
                 icon: const Icon(Icons.video_library),
                 label: const Text('Upload Video'),
-              ),
-              ElevatedButton.icon(
-                onPressed: () {
-                  final id = deviceId;
-                  if (id == null) return;
-                  c.deleteFiles(id: id, fileId: 0, type: 0);
-                },
-                icon: const Icon(Icons.delete_forever),
-                label: const Text('Delete All'),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
               ),
             ],
           ),
@@ -715,8 +758,35 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                                     ),
                                   ),
                                 const SizedBox(height: 6),
-                                Text(f.fileName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
-                                Text('ID: ${f.fileId}  ${(f.fileType == 1) ? 'IMG' : 'VID'}  $progress%', style: const TextStyle(fontSize: 12)),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(f.fileName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                          Text('ID: ${f.fileId}  ${(f.fileType == 1) ? 'IMG' : 'VID'}  $progress%', style: const TextStyle(fontSize: 12)),
+                                        ],
+                                      ),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.delete, color: Colors.red, size: 20),
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
+                                      onPressed: () {
+                                        final id = deviceId;
+                                        if (id == null) return;
+                                        c.deleteFiles(id: id, fileId: f.fileId, type: 0);
+                                        // Refresh file list after deletion
+                                        Future.delayed(const Duration(milliseconds: 500), () {
+                                          c.refreshFileList(id: id);
+                                          setState(() {});
+                                        });
+                                      },
+                                      tooltip: 'Delete ${f.fileName}',
+                                    ),
+                                  ],
+                                ),
                               ],
                             ),
                           ),
