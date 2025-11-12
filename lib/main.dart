@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:hologram_test/theme/theme.dart';
 
 import 'utils/hologram_client.dart';
+import 'pages/device_connection_page.dart';
 
 void main() {
   runApp(const MyApp());
@@ -19,20 +20,23 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Hologram Tester',
       theme: theme,
-      home: const HomePage(),
+      home: const DeviceConnectionPage(),
     );
   }
 }
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  const HomePage({super.key, this.initialClient, this.initialIp});
+
+  final HologramClient? initialClient;
+  final String? initialIp;
 
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
-  final ipController = TextEditingController(text: '192.168.43.1');
+  late final TextEditingController ipController;
   HologramClient? client;
   StreamSubscription<Map<String, dynamic>>? sub;
   String? selectedDeviceId;
@@ -54,7 +58,62 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   @override
   void initState() {
     super.initState();
+    ipController = TextEditingController(text: widget.initialIp ?? '192.168.43.1');
     _tabController = TabController(length: 6, vsync: this);
+    
+    // If initial client is provided, use it
+    if (widget.initialClient != null) {
+      client = widget.initialClient;
+      _setupClientListeners();
+    }
+  }
+
+  void _setupClientListeners() {
+    if (client == null) return;
+    
+    sub?.cancel();
+    sub = client!.messages.listen((msg) {
+      setState(() {
+        selectedDeviceId ??= client!.deviceInfo?.id ?? client!.status?.ip ?? '';
+        if (client!.status?.brightness != null) brightness = client!.status!.brightness!;
+        if (client!.status?.volume != null) volume = client!.status!.volume!;
+        if (client!.status?.playMode != null) playMode = client!.status!.playMode!;
+        if (!_isReady && (msg['cmd'] != null || msg['properties'] != null)) {
+          _isReady = true;
+          _isConnecting = false;
+        }
+        if (msg['error'] != null || msg['done'] != null) {
+          _isConnecting = false;
+          // If connection is lost (done message), navigate back to connection page
+          if (msg['done'] == true && mounted) {
+            Future.delayed(const Duration(milliseconds: 500), () {
+              if (mounted) {
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(
+                    builder: (context) => const DeviceConnectionPage(),
+                  ),
+                );
+              }
+            });
+          }
+        }
+      });
+    });
+    
+    logsSub?.cancel();
+    logsSub = client!.logs.listen((line) {
+      setState(() {
+        _logs.add(line);
+        if (_logs.length > 2000) {
+          _logs.removeRange(0, _logs.length - 2000);
+        }
+      });
+    });
+    
+    setState(() {
+      _isReady = true;
+      _isConnecting = false;
+    });
   }
 
   @override
@@ -135,8 +194,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _logs.clear();
       _isConnecting = false;
       _isReady = false;
-
     });
+    
+    // Navigate back to device connection page after disconnecting
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (context) => const DeviceConnectionPage(),
+        ),
+      );
+    }
   }
 
   String? get deviceId => selectedDeviceId ?? client?.deviceInfo?.id;
