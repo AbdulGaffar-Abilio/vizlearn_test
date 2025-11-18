@@ -307,8 +307,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     return Scaffold(
       appBar: AppBar(
         title: const Text('Hologram Tester'),
-        bottom: c != null && _isReady
-            ? TabBar(
+        bottom: TabBar(
                 controller: _tabController,
                 isScrollable: true,
                 labelColor: Colors.white,
@@ -320,8 +319,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   Tab(text: 'Device Info'),
                   Tab(text: 'Logs'),
                 ],
-              )
-            : null,
+              ),
         actions: [
           IconButton(
             onPressed: _isConnecting ? null : (c == null ? connect : disconnect),
@@ -356,12 +354,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           ),
           // Tab content
           Expanded(
-            child: c == null
-                ? const Center(child: Text('Not connected. Please connect to device first.'))
-                : !_isReady
-                    ? const Center(child: CircularProgressIndicator())
-                    : TabBarView(
-
+            child: _isConnecting
+                ? const Center(child: CircularProgressIndicator())
+                : TabBarView(
                     controller: _tabController,
                     children: [
                       _buildBasicControlsTab(c),
@@ -378,7 +373,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     );
   }
 
-  Widget _buildBasicControlsTab(HologramClient c) {
+  Widget _buildBasicControlsTab(HologramClient? c) {
+    final isConnected = c != null && _isReady;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -389,27 +385,27 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             runSpacing: 8,
             children: [
               ElevatedButton.icon(
-                onPressed: () => sendControl(1),
+                onPressed: isConnected ? () => sendControl(1) : null,
                 icon: const Icon(Icons.power_settings_new),
                 label: const Text('Power On'),
               ),
               ElevatedButton.icon(
-                onPressed: () => sendControl(0),
+                onPressed: isConnected ? () => sendControl(0) : null,
                 icon: const Icon(Icons.power_off),
                 label: const Text('Shutdown'),
               ),
               ElevatedButton.icon(
-                onPressed: () => sendControl(2),
+                onPressed: isConnected ? () => sendControl(2) : null,
                 icon: const Icon(Icons.refresh),
                 label: const Text('Restart'),
               ),
               ElevatedButton.icon(
-                onPressed: () => sendControl(3),
+                onPressed: isConnected ? () => sendControl(3) : null,
                 icon: const Icon(Icons.play_arrow),
                 label: const Text('Play'),
               ),
               ElevatedButton.icon(
-                onPressed: () => sendControl(5),
+                onPressed: isConnected ? () => sendControl(5) : null,
                 icon: const Icon(Icons.pause),
                 label: const Text('Pause'),
               ),
@@ -433,7 +429,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                           value: brightness.toDouble(),
                           label: '$brightness',
                           onChanged: (v) => setState(() => brightness = v.toInt()),
-                          onChangeEnd: (_) => sendControl(7, brightnessVal: brightness),
+                          onChangeEnd: isConnected ? (_) => sendControl(7, brightnessVal: brightness) : null,
                         ),
                       ),
                       SizedBox(width: 60, child: Text('$brightness', textAlign: TextAlign.center)),
@@ -461,7 +457,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                           value: volume.toDouble(),
                           label: '$volume',
                           onChanged: (v) => setState(() => volume = v.toInt()),
-                          onChangeEnd: (_) => sendControl(0xB, volumeVal: volume),
+                          onChangeEnd: isConnected ? (_) => sendControl(0xB, volumeVal: volume) : null,
                         ),
                       ),
                       SizedBox(width: 60, child: Text('$volume', textAlign: TextAlign.center)),
@@ -480,17 +476,17 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 children: [
                   const Text('Play Mode', style: TextStyle(fontWeight: FontWeight.bold)),
                   DropdownButtonFormField<int>(
-                    value: playMode,
+                    initialValue: playMode,
                     items: const [
                       DropdownMenuItem(value: 1, child: Text('Sequential Loop')),
                       DropdownMenuItem(value: 2, child: Text('Single Loop')),
                       DropdownMenuItem(value: 3, child: Text('Random Play')),
                     ],
-                    onChanged: (v) {
+                    onChanged: isConnected ? (v) {
                       if (v == null) return;
                       setState(() => playMode = v);
                       sendControl(0x21, playModeVal: v);
-                    },
+                    } : null,
                   ),
                 ],
               ),
@@ -515,7 +511,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                       style: TextStyle(fontSize: 12, color: Colors.grey)),
                   const SizedBox(height: 12),
                   ElevatedButton.icon(
-                    onPressed: () async {
+                    onPressed: isConnected ? () async {
                       final id = deviceId;
                       if (id != null) {
                         // Show confirmation dialog
@@ -556,7 +552,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                           }
                         }
                       }
-                    },
+                    } : null,
                     icon: const Icon(Icons.restore),
                     label: const Text('Factory Reset'),
                     style: ElevatedButton.styleFrom(
@@ -573,7 +569,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     );
   }
 
-  Widget _buildAdvancedControlsTab(HologramClient c) {
+  Widget _buildAdvancedControlsTab(HologramClient? c) {
+    final isConnected = c != null && _isReady;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -586,30 +583,30 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             runSpacing: 8,
             children: [
               GestureDetector(
-                onLongPressStart: (_) => _startAngleAdjustment(0),
-                onLongPressEnd: (_) => _stopAngleAdjustment(),
+                onLongPressStart: isConnected ? (_) => _startAngleAdjustment(0) : null,
+                onLongPressEnd: isConnected ? (_) => _stopAngleAdjustment() : null,
                 child: ElevatedButton.icon(
-                  onPressed: () => sendControl(0x10, adjustmentVal: 0),
+                  onPressed: isConnected ? () => sendControl(0x10, adjustmentVal: 0) : null,
                   icon: const Icon(Icons.remove),
                   label: const Text('Angle - (Long press)'),
                 ),
               ),
               GestureDetector(
-                onLongPressStart: (_) => _startAngleAdjustment(1),
-                onLongPressEnd: (_) => _stopAngleAdjustment(),
+                onLongPressStart: isConnected ? (_) => _startAngleAdjustment(1) : null,
+                onLongPressEnd: isConnected ? (_) => _stopAngleAdjustment() : null,
                 child: ElevatedButton.icon(
-                  onPressed: () => sendControl(0x10, adjustmentVal: 1),
+                  onPressed: isConnected ? () => sendControl(0x10, adjustmentVal: 1) : null,
                   icon: const Icon(Icons.add),
                   label: const Text('Angle + (Long press)'),
                 ),
               ),
               ElevatedButton.icon(
-                onPressed: () => sendControl(0x11),
+                onPressed: isConnected ? () => sendControl(0x11) : null,
                 icon: const Icon(Icons.open_in_full),
                 label: const Text('Open Angle'),
               ),
               ElevatedButton.icon(
-                onPressed: () => sendControl(0x12),
+                onPressed: isConnected ? () => sendControl(0x12) : null,
                 icon: const Icon(Icons.close_fullscreen),
                 label: const Text('Close Angle'),
               ),
@@ -623,22 +620,22 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             runSpacing: 8,
             children: [
               ElevatedButton.icon(
-                onPressed: () => sendControl(0x23),
+                onPressed: isConnected ? () => sendControl(0x23) : null,
                 icon: const Icon(Icons.rotate_right),
                 label: const Text('Forward Rotation'),
               ),
               ElevatedButton.icon(
-                onPressed: () => sendControl(0x24),
+                onPressed: isConnected ? () => sendControl(0x24) : null,
                 icon: const Icon(Icons.rotate_left),
                 label: const Text('Reverse Rotation'),
               ),
               ElevatedButton.icon(
-                onPressed: () => sendControl(0x25),
+                onPressed: isConnected ? () => sendControl(0x25) : null,
                 icon: const Icon(Icons.power_settings_new),
                 label: const Text('Power On Rotation'),
               ),
               ElevatedButton.icon(
-                onPressed: () => sendControl(0x26),
+                onPressed: isConnected ? () => sendControl(0x26) : null,
                 icon: const Icon(Icons.power_off),
                 label: const Text('Power On Non Rotation'),
               ),
@@ -650,7 +647,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             runSpacing: 8,
             children: [
               ElevatedButton.icon(
-                onPressed: () => sendControl(0x27),
+                onPressed: isConnected ? () => sendControl(0x27) : null,
                 icon: const Icon(Icons.memory),
                 label: const Text('Start Stop Memory'),
               ),
@@ -661,7 +658,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     );
   }
 
-  Widget _buildMediaTab(HologramClient c) {
+  Widget _buildMediaTab(HologramClient? c) {
+    final isConnected = c != null && _isReady;
     return Column(
       children: [
         Padding(
@@ -671,7 +669,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             runSpacing: 8,
             children: [
               ElevatedButton.icon(
-                onPressed: pickAndUploadVideo,
+                onPressed: isConnected ? pickAndUploadVideo : null,
                 icon: const Icon(Icons.video_library),
                 label: const Text('Upload Video'),
               ),
@@ -681,16 +679,18 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         Expanded(
           child: RefreshIndicator(
             onRefresh: () async {
-              final id = deviceId;
-              if (id != null) {
-                c.refreshFileList(id: id);
-                // Wait a bit for the device to respond with file list
-                await Future<void>.delayed(const Duration(milliseconds: 500));
+              if (isConnected && c != null) {
+                final id = deviceId;
+                if (id != null) {
+                  c.refreshFileList(id: id);
+                  // Wait a bit for the device to respond with file list
+                  await Future<void>.delayed(const Duration(milliseconds: 500));
+                }
+                setState(() {});
               }
-              setState(() {});
             },
-            child: c.files.isEmpty
-                ? const Center(child: Text('No files found'))
+            child: c == null || c.files.isEmpty
+                ? Center(child: Text(isConnected ? 'No files found' : 'Not connected - Connect to view files'))
                 : GridView.builder(
                     padding: const EdgeInsets.all(8),
                     gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -708,7 +708,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                       final progress = c.fileProgress[f.fileId] ?? f.percentage;
                       return Card(
                         child: InkWell(
-                          onTap: () {
+                          onTap: isConnected ? () {
                             // Prevent playing the same file multiple times in quick succession
                             final now = DateTime.now();
                             if (_lastPlayedFileId == f.fileId && 
@@ -725,7 +725,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                             Future.delayed(const Duration(milliseconds: 100), () {
                               sendControl(6, fileId: f.fileId); // Play Specific File
                             });
-                          },
+                          } : null,
                           child: Padding(
                             padding: const EdgeInsets.all(8),
                             child: Column(
@@ -773,16 +773,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                                       icon: const Icon(Icons.delete, color: Colors.red, size: 20),
                                       padding: EdgeInsets.zero,
                                       constraints: const BoxConstraints(),
-                                      onPressed: () {
+                                      onPressed: isConnected ? () {
                                         final id = deviceId;
-                                        if (id == null) return;
+                                        if (id == null || c == null) return;
                                         c.deleteFiles(id: id, fileId: f.fileId, type: 0);
                                         // Refresh file list after deletion
                                         Future.delayed(const Duration(milliseconds: 500), () {
                                           c.refreshFileList(id: id);
                                           setState(() {});
                                         });
-                                      },
+                                      } : null,
                                       tooltip: 'Delete ${f.fileName}',
                                     ),
                                   ],
@@ -800,7 +800,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     );
   }
 
-  Widget _buildSystemSettingsTab(HologramClient c) {
+  Widget _buildSystemSettingsTab(HologramClient? c) {
+    final isConnected = c != null && _isReady;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -813,51 +814,51 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             runSpacing: 8,
             children: [
               ElevatedButton(
-                onPressed: () => _showSystemControlDialog(c, 1),
+                onPressed: isConnected ? () => _showSystemControlDialog(c!, 1) : null,
                 child: const Text('Update Immediately'),
               ),
               ElevatedButton(
-                onPressed: () => _showSystemControlDialog(c, 5),
+                onPressed: isConnected ? () => _showSystemControlDialog(c!, 5) : null,
                 child: const Text('Display Device Info'),
               ),
               ElevatedButton(
-                onPressed: () => _showSystemControlDialog(c, 8),
+                onPressed: isConnected ? () => _showSystemControlDialog(c!, 8) : null,
                 child: const Text('Open Status Form'),
               ),
               ElevatedButton(
-                onPressed: () => _showSystemControlDialog(c, 9),
+                onPressed: isConnected ? () => _showSystemControlDialog(c!, 9) : null,
                 child: const Text('Close Status Form'),
               ),
               ElevatedButton(
-                onPressed: () => _showSystemControlDialog(c, 17),
+                onPressed: isConnected ? () => _showSystemControlDialog(c!, 17) : null,
                 child: const Text('Set Status Report Interval'),
               ),
               ElevatedButton(
-                onPressed: () => _showSystemControlDialog(c, 18),
+                onPressed: isConnected ? () => _showSystemControlDialog(c!, 18) : null,
                 child: const Text('Set File List Report Interval'),
               ),
               ElevatedButton(
-                onPressed: () => _showSystemControlDialog(c, 19),
+                onPressed: isConnected ? () => _showSystemControlDialog(c!, 19) : null,
                 child: const Text('Display SN Code'),
               ),
               ElevatedButton(
-                onPressed: () => _showSystemControlDialog(c, 20),
+                onPressed: isConnected ? () => _showSystemControlDialog(c!, 20) : null,
                 child: const Text('Hide SN Code'),
               ),
               ElevatedButton(
-                onPressed: () => _showSystemControlDialog(c, 21),
+                onPressed: isConnected ? () => _showSystemControlDialog(c!, 21) : null,
                 child: const Text('Turn On Light Test'),
               ),
               ElevatedButton(
-                onPressed: () => _showSystemControlDialog(c, 22),
+                onPressed: isConnected ? () => _showSystemControlDialog(c!, 22) : null,
                 child: const Text('Turn Off Light Test'),
               ),
               ElevatedButton(
-                onPressed: () => _showSystemControlDialog(c, 23),
+                onPressed: isConnected ? () => _showSystemControlDialog(c!, 23) : null,
                 child: const Text('Set Time'),
               ),
               ElevatedButton(
-                onPressed: () => _showColorToneDialog(c),
+                onPressed: isConnected ? () => _showColorToneDialog(c!) : null,
                 child: const Text('Set Color Tone'),
               ),
             ],
@@ -866,7 +867,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           const Text('WiFi Configuration', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           ElevatedButton.icon(
-            onPressed: () => _showWiFiConfigDialog(c),
+            onPressed: isConnected ? () => _showWiFiConfigDialog(c!) : null,
             icon: const Icon(Icons.wifi),
             label: const Text('Configure WiFi'),
           ),
@@ -874,7 +875,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           const Text('Bluetooth Configuration', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           ElevatedButton.icon(
-            onPressed: () => _showBluetoothConfigDialog(c),
+            onPressed: isConnected ? () => _showBluetoothConfigDialog(c!) : null,
             icon: const Icon(Icons.bluetooth),
             label: const Text('Configure Bluetooth'),
           ),
@@ -882,7 +883,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           const Text('Time Configuration', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           ElevatedButton.icon(
-            onPressed: () => _showTimeConfigDialog(c),
+            onPressed: isConnected ? () => _showTimeConfigDialog(c!) : null,
             icon: const Icon(Icons.schedule),
             label: const Text('Configure Time Schedule'),
           ),
@@ -891,9 +892,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     );
   }
 
-  Widget _buildDeviceInfoTab(HologramClient c) {
-    final info = c.deviceInfo;
-    final status = c.status;
+  Widget _buildDeviceInfoTab(HologramClient? c) {
+    final info = c?.deviceInfo;
+    final status = c?.status;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -1373,7 +1374,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     );
   }
 
-  Widget _buildLogsTab(HologramClient c) {
+  Widget _buildLogsTab(HologramClient? c) {
     return Column(
       children: [
         Padding(
