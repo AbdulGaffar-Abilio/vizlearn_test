@@ -84,6 +84,7 @@ class HologramClient {
   String ip;
   final Uri httpBase;
   final Uri wsUri;
+  bool isNetworkMode = false; // Network mode flag (type=2 for cluster/network mode)
 
   final _protocol = HologramProtocol();
   WebSocketChannel? _channel;
@@ -321,6 +322,7 @@ class HologramClient {
     int? adjustmentValue,
     int? playMode,
     int? speedValue,
+    bool? isNetworkMode,
   }) {
     final order = _protocol.nextOrder();
     // Use current status values if not provided
@@ -329,9 +331,11 @@ class HologramClient {
     final currentPlayMode = playMode ?? status?.playMode ?? 1;
     // Speed should be in range 600-900, default to 750
     final currentSpeed = speedValue ?? 750;
+    // Use network mode if specified, otherwise use instance flag
+    final useNetworkMode = isNetworkMode ?? this.isNetworkMode;
     
     final props = <String, dynamic>{
-      'type': 1,
+      'type': useNetworkMode ? 2 : 1, // 1 for standalone, 2 for network mode
       'id': id,
       'value': value,
       'file_id': fileId ?? 0,
@@ -345,11 +349,11 @@ class HologramClient {
       cmd: 0x2E,
       order: order,
       properties: props,
-      source: 0, // Use integer 0 per protocol for device control
-      destination: 0, // Use integer 0 per protocol for device control
+      source: useNetworkMode ? id : 0, // Use device ID as source in network mode
+      destination: useNetworkMode ? id : 0, // Use device ID as destination in network mode
     );
     _channel?.sink.add(json);
-    _log('TX 0x2E DeviceControl value=$value id=$id file_id=${props['file_id']} brightness=${props['brightness_value']} volume=${props['volume_value']} play_mode=${props['play_mode']} speed=${props['speed_value']}');
+    _log('TX 0x2E DeviceControl value=$value id=$id type=${useNetworkMode ? 2 : 1} file_id=${props['file_id']} brightness=${props['brightness_value']} volume=${props['volume_value']} play_mode=${props['play_mode']} speed=${props['speed_value']}');
     _log('TX JSON: $json');
   }
 
@@ -395,11 +399,16 @@ class HologramClient {
     int level = 0,
     int position = 0,
     int packNumber = 0,
-    int type = 0, // 0-Device (single device P mode), 1-Splicing (S mode), 2-Cluster (N mode)
+    int? type, // 0-Device (single device P mode), 1-Splicing (S mode), 2-Cluster (N mode)
+    bool? isNetworkMode,
   }) {
     final order = _protocol.nextOrder();
+    // Use network mode if specified, otherwise use instance flag
+    final useNetworkMode = isNetworkMode ?? this.isNetworkMode;
+    final modeType = type ?? (useNetworkMode ? 2 : 0); // 0 for standalone, 2 for network mode
+    
     final props = <String, dynamic>{
-      'type': type, // 0 for single device mode (P)
+      'type': modeType,
       'id': id,
       'file_id': fileId,
       'file_type': fileType,
@@ -415,11 +424,11 @@ class HologramClient {
       cmd: 0x41,
       order: order,
       properties: props,
-      source: 0,
-      destination: 0,
+      source: useNetworkMode ? id : 0, // Use device ID as source in network mode
+      destination: useNetworkMode ? id : 0, // Use device ID as destination in network mode
     );
     _channel?.sink.add(json);
-    _log('TX 0x41 PrepareTransmit type=$fileType file_id=$fileId name=$fileName');
+    _log('TX 0x41 PrepareTransmit type=$fileType mode=$modeType file_id=$fileId name=$fileName');
   }
 
   Future<void> uploadImageBytes({
@@ -428,6 +437,7 @@ class HologramClient {
     required String fileName,
     required Uint8List bytes,
     int chunkSize = 32768, // Protocol says max 32768 bytes per packet (data portion)
+    bool? isNetworkMode,
   }) async {
     if (_channel == null) {
       _log('Error: WebSocket not connected');
@@ -440,22 +450,24 @@ class HologramClient {
     _log('Image upload preparation: file_id=$fileId name=$fileName size=$total bytes, will send $packCount packets');
 
     // CRITICAL: Send 0x41 "prepare to transmit" command FIRST
-    // According to protocol analysis: type=0 (device mode), pack_number=0
+    // Use network mode if specified, otherwise use instance flag
+    final useNetworkMode = isNetworkMode ?? this.isNetworkMode;
     prepareToTransmit(
       id: id,
       fileId: fileId,
       fileType: 1, // 1 = Image
       fileName: fileName,
-      type: 0, // CRITICAL: Try type=0 (device mode) - some firmware requires this
+      type: useNetworkMode ? 2 : 0, // 0 for standalone, 2 for network mode
       playCount: 1,
       residenceTime: 0,
       displayMode: 0,
       level: 0,
       position: 0,
-      packNumber: 0, // Protocol says pack_number=0 for standalone mode
+      packNumber: 0,
+      isNetworkMode: useNetworkMode,
     );
     
-    _log('TX 0x41 PrepareToTransmit: file_id=$fileId, file_type=1 (Image), type=0 (Device), pack_number=0, name=$fileName');
+    _log('TX 0x41 PrepareToTransmit: file_id=$fileId, file_type=1 (Image), type=${useNetworkMode ? 2 : 0} (${useNetworkMode ? "Network" : "Device"}), pack_number=0, name=$fileName');
 
     // Wait 300ms for device to be ready after prepare command
     // Device firmware expects ~200-500ms gap between 0x41 and first data packet
@@ -542,6 +554,7 @@ class HologramClient {
     required String fileName,
     required Uint8List bytes,
     Uri? overrideUploadUrl,
+    bool? isNetworkMode,
   }) async {
     // Initialize upload progress
     final totalBytes = bytes.length;
@@ -549,13 +562,15 @@ class HologramClient {
     _log('Video upload starting: file_id=$fileId name=$fileName size=$totalBytes bytes');
     
     // Per spec, send prepare first, then HTTP upload to http://ip:8092
-    // For single device mode (P), type should be 0
+    // Use network mode if specified, otherwise use instance flag
+    final useNetworkMode = isNetworkMode ?? this.isNetworkMode;
     prepareToTransmit(
       id: id,
       fileId: fileId,
       fileType: 2, // 2 = Video
       fileName: fileName,
-      type: 0, // 0 = Device (single device P mode)
+      type: useNetworkMode ? 2 : 0, // 0 = Device (standalone), 2 = Cluster (network mode)
+      isNetworkMode: useNetworkMode,
     );
 
     // Wait for device to be ready after prepare command
@@ -781,65 +796,72 @@ class HologramClient {
     return resp;
   }
 
-  void deleteFiles({required String id, int fileId = 0, int type = 0}) {
+  void deleteFiles({required String id, int fileId = 0, int? type, bool? isNetworkMode}) {
     // type: 0 = single device (P), 1 = splicing (S), 2 = network (N)
     // fileId: 0 = delete all files, >0 = delete specific file
     final order = _protocol.nextOrder();
+    // Use network mode if specified, otherwise use instance flag
+    final useNetworkMode = isNetworkMode ?? this.isNetworkMode;
+    final modeType = type ?? (useNetworkMode ? 2 : 0); // 0 for standalone, 2 for network mode
+    
     final props = <String, dynamic>{
-      'type': type, // 0 for single device mode
+      'type': modeType,
       'id': id,
       'file_id': fileId,
     };
     
-    // Try matching prepareToTransmit pattern (source: 0, destination: 0)
-    // This is consistent with other file operations like 0x41
+    // Use device ID as source/destination in network mode
     final json = HologramProtocol.envelopeWithProperties(
       cmd: 0x43,
       order: order,
       properties: props,
-      source: 0, // Use integer 0 like prepareToTransmit (0x41)
-      destination: 0, // Use integer 0 like prepareToTransmit (0x41)
+      source: useNetworkMode ? id : 0, // Use device ID in network mode
+      destination: useNetworkMode ? id : 0, // Use device ID in network mode
     );
     _channel?.sink.add(json);
     if (fileId == 0) {
-      _log('TX 0x43 DeleteFiles: ALL files (type=$type, id=$id) source=0 dest=0');
+      _log('TX 0x43 DeleteFiles: ALL files (type=$modeType, id=$id)');
     } else {
-      _log('TX 0x43 DeleteFiles: file_id=$fileId (type=$type, id=$id) source=0 dest=0');
+      _log('TX 0x43 DeleteFiles: file_id=$fileId (type=$modeType, id=$id)');
     }
     _log('TX JSON: $json');
     
     // Automatically refresh file list after deletion
     // Wait a bit for device to process the delete command
     Future.delayed(const Duration(milliseconds: 800), () {
-      refreshFileList(id: id);
+      refreshFileList(id: id, isNetworkMode: useNetworkMode);
       _log('Auto-refreshing file list after delete command');
     });
   }
 
-  void refreshFileList({required String id}) {
+  void refreshFileList({required String id, bool? isNetworkMode}) {
     // 1) Ask device to update immediately (commonly triggers state push)
     sendSystemControl(id: id, controlType: 1);
     // 2) Also explicitly request file list if supported (cmd 0x1D)
-    requestFileList(id: id);
+    requestFileList(id: id, isNetworkMode: isNetworkMode);
     _log('Requesting file list refresh (system update + explicit request)');
   }
 
   // Explicitly request file list (0x1D) - many firmwares require this to respond with 0x1E list
-  void requestFileList({required String id, int type = 0}) {
+  void requestFileList({required String id, int? type, bool? isNetworkMode}) {
     final order = _protocol.nextOrder();
+    // Use network mode if specified, otherwise use instance flag
+    final useNetworkMode = isNetworkMode ?? this.isNetworkMode;
+    final modeType = type ?? (useNetworkMode ? 2 : 0); // 0 for standalone, 2 for network mode
+    
     final props = <String, dynamic>{
-      'type': type, // 0 = single device
+      'type': modeType,
       'id': id,
     };
     final json = HologramProtocol.envelopeWithProperties(
       cmd: 0x1D,
       order: order,
       properties: props,
-      source: 0,
-      destination: 0,
+      source: useNetworkMode ? id : 0, // Use device ID in network mode
+      destination: useNetworkMode ? id : 0, // Use device ID in network mode
     );
     _channel?.sink.add(json);
-    _log('TX 0x1D RequestFileList type=$type id=$id');
+    _log('TX 0x1D RequestFileList type=$modeType id=$id');
   }
 
   // Fallback: Upload video bytes via WebSocket binary packets if HTTP upload fails

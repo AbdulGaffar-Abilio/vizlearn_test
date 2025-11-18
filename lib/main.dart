@@ -7,6 +7,7 @@ import 'package:hologram_test/theme/theme.dart';
 
 import 'utils/hologram_client.dart';
 import 'pages/device_connection_page.dart';
+import 'pages/main_navigation_page.dart';
 
 void main() {
   runApp(const MyApp());
@@ -20,7 +21,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Hologram Tester',
       theme: theme,
-      home: const DeviceConnectionPage(),
+      home: const MainNavigationPage(),
     );
   }
 }
@@ -200,7 +201,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     if (mounted) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (context) => const DeviceConnectionPage(),
+          builder: (context) => const MainNavigationPage(),
         ),
       );
     }
